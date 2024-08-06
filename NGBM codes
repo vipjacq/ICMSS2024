@@ -1,0 +1,211 @@
+# GDP ----
+raw_data <- c(352.1, 358.7, 343.9, 338.2, 337.4, 371.4, 361.5, 368.1, 385.9, 398.7, 381.4, 378.4, 397.9, 410.3, 397.4)
+x <- raw_data[1:round((length(raw_data)*0.7))]
+
+# Naive NGBM(1,1) ----
+ago <- cumsum(x)
+z <- NULL
+for (i in 2:length(ago)) {
+  z[i] <- (0.5*ago[i])+(0.5*ago[i-1])
+}
+
+m <- seq(-0.99, 0.99, 0.001) # Given range of parameter n
+a <- NULL; b <- NULL
+
+for (i in 1:length(m)) {
+  B <- matrix(rep(0, 2*(length(z)-1)), nrow=length(z)-1, ncol=2)
+  B[,1] <- -z[2:length(z)]; B[,2] <- (z[2:length(z)])^m[i]
+  Y <- as.vector(x[2:length(x)])
+  a[i] <- ((solve(t(B)%*%B)%*%t(B))%*%Y)[1,]; b[i] <- ((solve(t(B)%*%B)%*%t(B))%*%Y)[2,]
+}
+
+x.hat <- list()
+for (j in 1:length(a)) {
+  x.hat.ini <- NULL
+  for (k in 1:length(raw_data)) {
+    x.hat.ini[k] <- ((ago[1]^(1-m[j])-(b[j]/a[j]))*(exp(a[j]*(m[j]-1)*(k-1)))+(b[j]/a[j]))^(1/(1-m[j]))
+  }
+  x.hat[[j]] <- x.hat.ini
+}
+
+pred <- list(); for (i in 1:length(b)){pred[[i]] <- diff(x.hat[[i]])}
+mape <- NULL; for (i in 1:length(a)) {mape[i] <- mean(abs((raw_data[2:15]-pred[[i]])/raw_data[2:15])*100)}
+outsamp.mape <- NULL; for (i in 1:length(a)) {outsamp.mape[i] <- mean(abs((raw_data[13:15]-pred[[i]][12:14])/raw_data[13:15])*100)}
+
+# Predicted values with the lowest outsample error
+diff(x.hat[[which(outsamp.mape==min(outsamp.mape))]])
+
+
+# NGBM(1,1) with m formulation  ----
+ago <- cumsum(x)
+z <- NULL
+for (i in 2:length(ago)) {
+  z[i] <- (0.5*ago[i])+(0.5*ago[i-1])
+}
+
+m.ini <- NULL; for (k in 2:(length(x)-1)) {
+  m1 <- (x[k+1]-x[k])*z[k+1]*z[k]*x[k]
+  m2 <- (x[k]-x[k-1])*z[k+1]*z[k]*x[k+1]
+  m3 <- (x[k+1])^2*z[k]*x[k]
+  m4 <- (x[k])^2*z[k+1]*x[k+1]
+  m.ini[k] <- (m1-m2)/((length(x)-2)*(m3-m4))
+}
+m <- log(abs(sum(na.omit(m.ini))), base=exp(length(x)))
+
+B <- matrix(rep(0, 2*(length(z)-1)), nrow=length(z)-1, ncol=2)
+B[,1] <- -z[2:length(z)]; B[,2] <- (z[2:length(z)])^m
+Y <- as.vector(x[2:length(x)])
+a <- ((solve(t(B)%*%B)%*%t(B))%*%Y)[1,]; b <- ((solve(t(B)%*%B)%*%t(B))%*%Y)[2,]
+
+x.hat <- c()
+for (k in 1:length(raw_data)) {
+  x.hat[k] <- ((ago[1]^(1-m)-(b/a))*(exp(a*(m-1)*(k-1)))+(b/a))^(1/(1-m))
+}
+pred <- diff(x.hat)
+results <- cbind(raw_data, c(NA,pred))
+colnames(results) <- c("Raw data", "Predicted")
+rownames(results) <- c("2020Q3", "2020Q4", "2021Q1", "2021Q2", "2021Q3", "2021Q4","2022Q1", "2022Q2", "2022Q3", "2022Q4", "2023Q1", "2023Q2", "2023Q3", "2023Q4", "2024Q1")
+
+mape <- mean(abs((raw_data[2:15]-pred)/raw_data[2:15])*100)
+outsamp.mape <- mean(abs((raw_data[13:15]-pred[12:14])/raw_data[13:15])*100)
+
+# optimized NGBM (Wu, et.al., 2019) ----
+ago <- cumsum(x)
+alpha <- seq(0.4, 0.8, by=0.00001)
+
+z <- list()
+for (i in 1:length(alpha)) {
+  z.ini <- c()
+  for (j in 2:length(ago)) {
+    z.ini[j] <- (alpha[i]*ago[j])+((1-alpha[i])*ago[j-1])
+  }
+  z[[i]] <- z.ini
+}
+
+m <- c()
+for (j in 1:length(alpha)) {
+  m.ini <- c()
+  for (k in 2:(length(x))) {
+    a <- (x[k+1]-raw_data[k])*z[[j]][k+1]*z[[j]][k]*x[k]
+    b <- (x[k]-x[k-1])*z[[j]][k+1]*z[[j]][k]*x[k+1]
+    c <- (length(ago)-2)*((x[k+1]^2*z[[j]][k]*x[k])-(x[k]^2*z[[j]][k+1]*x[k+1]))
+    m.ini[k] <- (a-b)/c
+  }
+  m[j] <- sum(na.omit(m.ini))
+}
+
+ab <- matrix(rep(0,2*length(alpha)), nrow=length(alpha), ncol=2)
+for(i in 1:length(alpha)) {
+  B <- matrix(rep(0, 2*(length(z[[i]])-1)), nrow=length(z[[i]])-1, ncol=2)
+  B[,1] <- -z[[i]][2:length(z[[i]])]; B[,2] <- (z[[i]][2:length(z[[i]])])^m[i]
+  Y <- as.vector(x[2:length(x)])
+  ab[i,1] <- ((solve(t(B)%*%B)%*%t(B))%*%Y)[1,]; ab[i,2] <- ((solve(t(B)%*%B)%*%t(B))%*%Y)[2,]
+}
+
+outsamp.mape <- c()
+for (i in 1:length(alpha)) {
+  x.hat <- c()
+  for (k in 1:length(raw_data)) {
+    x.hat[k] <- ((ago[1]^(1-m[i])-(ab[i,2]/ab[i,1]))*(exp(ab[i,1]*(m[i]-1)*(k-1)))+(ab[i,2]/ab[i,1]))^(1/(1-m[i]))
+  }
+  pred <- diff(x.hat)
+  outsamp.mape[i] <-mean(abs((raw_data[11:15]-pred[10:14])/raw_data[11:15])*100)
+}
+
+alpha.hat <- alpha[which(outsamp.mape==min(outsamp.mape))]
+
+x.hat <- c()
+for (k in 1:length(raw_data)) {
+  x.hat[k] <- ((ago[1]^(1-m[which(outsamp.mape==min(outsamp.mape))])-(ab[which(outsamp.mape==min(outsamp.mape)),2]/ab[which(outsamp.mape==min(outsamp.mape)),1]))*(exp(ab[which(outsamp.mape==min(outsamp.mape)),1]*(m[which(outsamp.mape==min(outsamp.mape))]-1)*(k-1)))+(ab[which(outsamp.mape==min(outsamp.mape)),2]/ab[which(outsamp.mape==min(outsamp.mape)),1]))^(1/(1-m[which(outsamp.mape==min(outsamp.mape))]))
+}
+pred <- diff(x.hat)
+
+outsamp.mape <-mean(abs((raw_data[13:15]-pred[12:14])/raw_data[13:15])*100)
+outsamp.mape
+
+# optimized NGBM (Cheng, et.al., 2022) ----
+library(gtools)
+alpha <- seq(0.01, 0.6, by=0.001)
+beta <- seq(0.01, 0.6, by=0.001)
+m <- seq(0.01, 0.6, by=0.001)
+params <- 
+
+G <- matrix(rep(0, 2*(length(ago)-1)), nrow=length(ago)-1, ncol=2) 
+for (i in 1:(length(ago)-1)) {
+  G[i,1] <- -ago[i]*(ago[i+1]/ago[i])^(1-alpha[i])
+  G[i,2] <- (ago[i]*(ago[i+1]/ago[i])^(1-beta[i]))^m[i]
+}
+
+H <- as.vector(x[2:length(x)])
+ab <- solve(t(G)%*%G)%*%t(G)%*%H
+x.hat <- c()
+for (k in 1:length(raw_data)) {
+  x.hat[k] <- ((ago[1]^(1-m)-(ab[2,1]/ab[1,1]))*(exp(ab[1,1]*(m-1)*(k-1)))+(ab[2,1]/ab[1,1]))^(1/(1-m))
+}
+pred <- diff(x.hat)
+outsamp.mape <-mean(abs((raw_data[12:15]-pred[11:14])/raw_data[12:15])*100)
+outsamp.mape
+
+# optimized NGBM (Wu, et.al., 2019) using PSO ----
+ago <- cumsum(x)
+
+# initial parameters
+set.seed(14344)
+alpha <- runif(100,0,1); m <- runif(100,-1,1)
+ave.mape=2.5
+while (ave.mape>2.09) {
+  z <- list()
+  for (i in 1:length(alpha)) {
+    z.ini <- c()
+    for (j in 2:length(ago)) {
+      z.ini[j] <- (alpha[i]*ago[j])+((1-alpha[i])*ago[j-1])
+    }
+    z[[i]] <- z.ini
+  }
+  
+  ab <- matrix(rep(0,2*length(alpha)), nrow=length(alpha), ncol=2)
+  for(i in 1:length(alpha)) {
+    B <- matrix(rep(0, 2*(length(z[[i]])-1)), nrow=length(z[[i]])-1, ncol=2)
+    B[,1] <- -z[[i]][2:length(z[[i]])]; B[,2] <- (z[[i]][2:length(z[[i]])])^m[i]
+    Y <- as.vector(x[2:length(x)])
+    ab[i,1] <- ((solve(t(B)%*%B)%*%t(B))%*%Y)[1,]; ab[i,2] <- ((solve(t(B)%*%B)%*%t(B))%*%Y)[2,]
+  }
+  
+  outsamp.mape <- c()
+  for (i in 1:length(alpha)) {
+    x.hat <- c(); 
+    for (k in 1:length(raw_data)) {
+      x.hat[k] <- ((ago[1]^(1-m[i])-(ab[i,2]/ab[i,1]))*(exp(ab[i,1]*(m[i]-1)*(k-1)))+(ab[i,2]/ab[i,1]))^(1/(1-m[i]))
+    }
+    pred <- diff(x.hat)
+    outsamp.mape[i] <-mean(abs((raw_data[11:15]-pred[10:14])/raw_data[11:15])*100)
+  }
+  
+  loc <- which(outsamp.mape==min(outsamp.mape))
+  alpha <- runif(100, alpha[loc]-0.05, alpha[loc]+0.05)
+  m <- runif(50, m[loc]-0.05, m[loc]+0.05)
+  ave.mape <- mean(outsamp.mape)
+}
+
+(optim.alpha <- alpha[loc])
+(optim.m <- m[loc])
+
+z.final <- c()
+for (j in 2:length(ago)) {
+  z.final[j] <- (optim.alpha*ago[j])+((1-optim.alpha)*ago[j-1])
+}
+
+B.final <- matrix(rep(0, 2*(length(z.final)-1)), nrow=length(z.final)-1, ncol=2)
+B.final[,1] <- -z.final[2:length(z.final)]
+B.final[,2] <- (z.final[2:length(z.final)])^optim.m
+Y <- as.vector(x[2:length(x)])
+a <- ((solve(t(B.final)%*%B.final)%*%t(B.final))%*%Y)[1,] 
+b <- ((solve(t(B.final)%*%B.final)%*%t(B.final))%*%Y)[2,]
+
+x.hat <- c()
+for (k in 1:length(raw_data)) {
+  x.hat[k] <- ((ago[1]^(1-optim.m)-(b/a))*(exp(a*(optim.m-1)*(k-1)))+(b/a))^(1/(1-optim.m))
+}
+pred.final <- diff(x.hat)
+mape <- mean(abs((raw_data[2:15]-pred.final)/raw_data[2:15])*100)
+outsamp.mape.final <- mean(abs((raw_data[12:15]-pred.final[11:14])/raw_data[12:15])*100)
